@@ -3,17 +3,24 @@ extern crate serde_json;
 
 use neon::prelude::*;
 
-use centipede::{
-    grad_release::VEShare,
-};
-use curv::{GE, BigInt};
-use curv::elliptic::curves::traits::{ECScalar, ECPoint};
+use centipede::grad_release::VEShare;
+use curv::BigInt;
+// use curv::elliptic::curves::traits::{ECScalar, ECPoint};
 use curv::arithmetic::traits::Converter;
-use curv::elliptic::curves::secp256_k1::Secp256k1Scalar;
+use curv::elliptic::curves::secp256_k1::{Secp256k1Point};
+use curv::elliptic::curves::{ECPoint, Point, Scalar};
 use hex;
 
 use crate::SEGMENT_SIZE;
 use centipede::grad_release::{FirstMessage, SegmentProof};
+
+pub fn pad(uncompressed_bytes: &[u8]) -> [u8; 65] {
+    let mut padded = [0u8; 65];
+    padded[0] = 0x04;
+    padded[1..33].copy_from_slice(&uncompressed_bytes[0..32]);
+    padded[33..].copy_from_slice(&uncompressed_bytes[32..]);
+    return padded;
+}
 
 pub fn create_share(mut cx: FunctionContext) -> JsResult<JsString> {
     let expected_args = 2;
@@ -22,14 +29,25 @@ pub fn create_share(mut cx: FunctionContext) -> JsResult<JsString> {
     }
 
     let secret_hex: String = cx.argument::<JsString>(0)?.value();
-    let secret_bn = BigInt::from_hex(&secret_hex);
-    let secret: Secp256k1Scalar = ECScalar::from(&secret_bn);
+    let secret_bn = BigInt::from_hex(&secret_hex).expect(&format!(
+        "failed to create secret_bn from hex {}",
+        &secret_hex
+    ));
+    let secret = Scalar::from_bigint(&secret_bn);
 
     let enc_key_hex: String = cx.argument::<JsString>(1)?.value();
     let enc_key_bytes = hex::decode(&enc_key_hex)
         .expect(&format!("failed hex::decode of enc_key {}", &enc_key_hex));
-    let enc_key: GE = ECPoint::from_bytes(enc_key_bytes.as_slice())
-        .expect(&format!("failed deserialization of enc_key {}", &enc_key_hex));
+    let enc_key = Point::from_raw(
+        Secp256k1Point::deserialize(&pad(enc_key_bytes.as_slice())).expect(&format!(
+            "failed deserialization of enc_key {}",
+            &enc_key_hex
+        )),
+    )
+    .expect(&format!(
+        "failed to create point from enc_key raw {}",
+        &enc_key_hex
+    ));
 
     let (first_message, share) = VEShare::create(&secret, &enc_key, &SEGMENT_SIZE);
 
@@ -48,8 +66,16 @@ pub fn verify_start(mut cx: FunctionContext) -> JsResult<JsBoolean> {
     let enc_key_hex: String = cx.argument::<JsString>(1)?.value();
     let enc_key_bytes = hex::decode(&enc_key_hex)
         .expect(&format!("failed hex::decode of enc_key {}", &enc_key_hex));
-    let enc_key: GE = ECPoint::from_bytes(enc_key_bytes.as_slice())
-        .expect(&format!("failed deserialization of enc_key {}", &enc_key_hex));
+    let enc_key = Point::from_raw(
+        Secp256k1Point::deserialize( &pad(enc_key_bytes.as_slice())).expect(&format!(
+            "failed deserialization of enc_key {}",
+            &enc_key_hex
+        )),
+    )
+    .expect(&format!(
+        "failed to create point from enc_key raw {}",
+        &enc_key_hex
+    ));
 
     let res = VEShare::start_verify(&first_message, &enc_key);
 
@@ -90,8 +116,16 @@ pub fn verify_segment(mut cx: FunctionContext) -> JsResult<JsBoolean> {
     let enc_key_hex: String = cx.argument::<JsString>(2)?.value();
     let enc_key_bytes = hex::decode(&enc_key_hex)
         .expect(&format!("failed hex::decode of enc_key {}", &enc_key_hex));
-    let enc_key: GE = ECPoint::from_bytes(enc_key_bytes.as_slice())
-        .expect(&format!("failed deserialization of enc_key {}", &enc_key_hex));
+    let enc_key = Point::from_raw(
+        Secp256k1Point::deserialize(&pad(enc_key_bytes.as_slice())).expect(&format!(
+            "failed deserialization of enc_key {}",
+            &enc_key_hex
+        )),
+    )
+    .expect(&format!(
+        "failed to create point from enc_key raw {}",
+        &enc_key_hex
+    ));
 
     let res = VEShare::verify_segment(&first_message, &segment_proof, &enc_key);
 
@@ -123,11 +157,14 @@ pub fn extract_secret(mut cx: FunctionContext) -> JsResult<JsString> {
     let segment_proofs = segment_proof_vec.as_slice();
 
     let dec_key_hex: String = cx.argument::<JsString>(2)?.value();
-    let dec_key_bn = BigInt::from_hex(&dec_key_hex);
-    let dec_key: Secp256k1Scalar = ECScalar::from(&dec_key_bn);
+    let dec_key_bn = BigInt::from_hex(&dec_key_hex).expect(&format!(
+        "could not parse bigInt for dec_key {}",
+        &dec_key_hex
+    ));
+    let dec_key = Scalar::from_bigint(&dec_key_bn);
 
     let secret = VEShare::extract_secret(&first_message, segment_proofs, &dec_key)
         .expect("Failed extracting secret");
 
-    Ok(cx.string(secret.to_big_int().to_hex()))
+    Ok(cx.string(secret.to_bigint().to_hex()))
 }
