@@ -19,7 +19,7 @@ zeroize = "1.4.3"
 serde = "1.0.130"
 serde_json = "1.0.72"
 serde_derive = "1.0.130"
-secp256k1 = "0.20.3"
+secp256k1 = "0.22.2"
 centipede = { git = "https://github.com/KZen-networks/centipede", tag = "v0.3.0" }
 curv = { version = "0.9.0", package = "curv-kzen"}
 hex = "0.4.3"
